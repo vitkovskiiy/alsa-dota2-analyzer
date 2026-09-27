@@ -14,9 +14,10 @@
 ## Стек
 
 - Node.js / fastify
-- PostgreSQL 
+- PostgreSQL + ORM = PrismaORM
 - REST API
-- ESLint + Prettier, Husky for githooks
+- ESLint + Prettier, 
+- Husky for githooks
 
 ## functional modules
 
