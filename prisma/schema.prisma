@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Hero {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  role        String
+  createdAt   DateTime     @default(now())
+
+  picks1      HeroPair[]   @relation("Hero1")
+  picks2      HeroPair[]   @relation("Hero2")
+  matchHeroes MatchHero[]
+}
+
+model Match {
+  id          Int          @id @default(autoincrement())
+  externalId  String       @unique
+  winnerSide  String
+  duration    Int
+  playedAt    DateTime
+  createdAt   DateTime     @default(now())
+
+  matchHeroes MatchHero[]
+}
+
+model MatchHero {
+  id        Int     @id @default(autoincrement())
+  matchId   Int
+  heroId    Int
+  side      String
+  won       Boolean
+
+  match     Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  hero      Hero    @relation(fields: [heroId], references: [id])
+
+  @@unique([matchId, heroId])
+  @@index([heroId])
+}
+
+model HeroPair {
+  id          Int     @id @default(autoincrement())
+  hero1Id     Int
+  hero2Id     Int
+  totalGames  Int     @default(0)
+  wins        Int     @default(0)
+  winRate     Float   @default(0)
+
+  hero1       Hero    @relation("Hero1", fields: [hero1Id], references: [id])
+  hero2       Hero    @relation("Hero2", fields: [hero2Id], references: [id])
+
+  @@unique([hero1Id, hero2Id])
+  @@index([hero1Id])
+  @@index([hero2Id])
+}
