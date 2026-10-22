@@ -1,4 +1,7 @@
 import Fastify, { FastifyInstance } from 'fastify'
+import { heroesRoutes } from './heroes/heroes.routes.js'
+import { matchesRoutes } from './matches/matches.routes.js'
+import { synergyRoutes } from './synergy/synergy.routes.js'
 
 export interface AppOptions {
   logger?: boolean | object
@@ -7,21 +10,28 @@ export interface AppOptions {
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: opts.logger ?? {
-      level: process.env.LOG_LEVEL || 'info',
+      level: process.env.LOG_LEVEL ?? 'info',
     },
   })
 
-  app.get('/health', async () => {
-    return { status: 'ok', timestamp: new Date().toISOString() }
-  })
+  // Health
+  app.get('/health', async () => ({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  }))
 
-  app.get('/', async () => {
-    return {
-      name: 'Alsa API',
-      description: 'Dota 2 Match Analyzer & Synergy Engine',
-      version: '1.0.0',
-    }
-  })
+  // Root / version
+  app.get('/version', async () => ({
+    name: 'Alsa API',
+    description: 'Dota 2 Match Analyzer & Synergy Engine',
+    version: '2.0.0',
+    sha: process.env.GIT_SHA ?? 'dev',
+  }))
+
+  // Domain routes
+  app.register(heroesRoutes)
+  app.register(matchesRoutes)
+  app.register(synergyRoutes)
 
   return app
 }
