@@ -1,7 +1,7 @@
 import prisma from './db.js'
-import { heroesService } from './heroes/heroes.service.js'
-import { matchesService } from './matches/matches.service.js'
-import { synergyService } from './synergy/synergy.service.js'
+import { heroesService } from './container/index.js'
+import { matchesService } from './container/index.js'
+import { synergyService } from './container/index.js'
 
 async function main() {
   console.log('Seeding heroes...')

@@ -1,4 +1,4 @@
-import prisma from '../db.js'
+import { SynergyRepository } from '../repositories/synergy.repository.js'
 import { STATIC_HEROES } from '../heroes/heroes.static.js'
 import { STATIC_MATCHES } from '../matches/matches.static.js'
 
@@ -13,24 +13,11 @@ export interface SynergyDTO {
 }
 
 export class SynergyService {
-  /**
-   * Top N synergy pairs for a hero.
-   * Single query with include вЂ” no N+1.
-   */
+  constructor(private synergyRepository: SynergyRepository) {}
+
   async topForHero(heroId: number, limit = 5): Promise<SynergyDTO[]> {
     try {
-      const pairs = await prisma.heroPair.findMany({
-        where: {
-          OR: [{ hero1Id: heroId }, { hero2Id: heroId }],
-          totalGames: { gte: 1 },
-        },
-        orderBy: { winRate: 'desc' },
-        take: limit,
-        include: {
-          hero1: { select: { id: true, name: true } },
-          hero2: { select: { id: true, name: true } },
-        },
-      })
+      const pairs = await this.synergyRepository.findPairsForHero(heroId, limit)
 
       if (pairs.length > 0) {
         return pairs.map((p) => ({
@@ -44,7 +31,7 @@ export class SynergyService {
         }))
       }
     } catch {
-      // Use the same prototype behavior when PostgreSQL is unavailable.
+      // Use the static prototype when PostgreSQL is empty or unavailable.
     }
 
     return this._staticTopForHero(heroId, limit)
@@ -81,7 +68,7 @@ export class SynergyService {
           }
           pair.totalGames++
           if (a.won) pair.wins++
-          pair.winRate = pair.wins / pair.totalGames
+          pair.winRate = pair.totalGames === 0 ? 0 : pair.wins / pair.totalGames
           pairs.set(key, pair)
         }
       }
@@ -92,66 +79,8 @@ export class SynergyService {
       .slice(0, limit)
   }
 
-  /**
-   * Recompute all HeroPair rows from MatchHero.
-   * Called after seeding / importing matches.
-   * Uses a transaction per pair to stay consistent.
-   */
+  /** Rebuild all HeroPair rows atomically from MatchHero. */
   async recompute(): Promise<void> {
-    // Get all matches with their heroes in one query
-    const matches = await prisma.match.findMany({
-      include: {
-        matchHeroes: { select: { heroId: true, side: true, won: true } },
-      },
-    })
-
-    // Accumulate (heroA, heroB) в†’ {games, wins}
-    const acc = new Map<
-      string,
-      { h1: number; h2: number; games: number; wins: number }
-    >()
-
-    for (const match of matches) {
-      const heroes = match.matchHeroes
-      for (let i = 0; i < heroes.length; i++) {
-        for (let j = i + 1; j < heroes.length; j++) {
-          const a = heroes[i]
-          const b = heroes[j]
-          // Only same-side pairs are "synergy"
-          if (a.side !== b.side) continue
-          const key = `${Math.min(a.heroId, b.heroId)}-${Math.max(a.heroId, b.heroId)}`
-          const existing = acc.get(key) ?? {
-            h1: Math.min(a.heroId, b.heroId),
-            h2: Math.max(a.heroId, b.heroId),
-            games: 0,
-            wins: 0,
-          }
-          existing.games++
-          if (a.won) existing.wins++
-          acc.set(key, existing)
-        }
-      }
-    }
-
-    // Upsert all pairs
-    for (const { h1, h2, games, wins } of acc.values()) {
-      await prisma.heroPair.upsert({
-        where: { hero1Id_hero2Id: { hero1Id: h1, hero2Id: h2 } },
-        update: {
-          totalGames: games,
-          wins,
-          winRate: games > 0 ? wins / games : 0,
-        },
-        create: {
-          hero1Id: h1,
-          hero2Id: h2,
-          totalGames: games,
-          wins,
-          winRate: games > 0 ? wins / games : 0,
-        },
-      })
-    }
+    await this.synergyRepository.recomputeAll()
   }
 }
-
-export const synergyService = new SynergyService()

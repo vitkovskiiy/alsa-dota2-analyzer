@@ -1,9 +1,11 @@
 import { FastifyInstance } from 'fastify'
-import { matchesService, CreateMatchInput } from './matches.service.js'
+import { matchesService } from '../container/index.js'
+import { CreateMatchInput } from './matches.service.js'
+import { BadRequestError } from '../errors/index.js'
 
 interface ListQuery {
-  limit?: string
-  offset?: string
+  limit?: number
+  offset?: number
 }
 interface IdParam {
   id: string
@@ -11,57 +13,102 @@ interface IdParam {
 
 export async function matchesRoutes(app: FastifyInstance) {
   // GET /matches?limit=20&offset=0
-  app.get<{ Querystring: ListQuery }>('/matches', async (req, reply) => {
-    const limit = Math.min(Number(req.query.limit ?? 20), 100)
-    const offset = Math.max(Number(req.query.offset ?? 0), 0)
-    if (isNaN(limit) || isNaN(offset)) {
-      return reply
-        .status(400)
-        .send({ error: 'limit and offset must be numbers' })
-    }
-    const matches = await matchesService.findAll(limit, offset)
-    return reply.send(matches)
-  })
+  app.get<{ Querystring: ListQuery }>(
+    '/matches',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          properties: {
+            limit: { type: 'integer', minimum: 1, maximum: 100 },
+            offset: { type: 'integer', minimum: 0 },
+          },
+          additionalProperties: false,
+        },
+      },
+    },
+    async (req, reply) => {
+      const limit = Math.min(Number(req.query.limit ?? 20), 100)
+      const offset = Math.max(Number(req.query.offset ?? 0), 0)
+      const matches = await matchesService.findAll(limit, offset)
+      return reply.send(matches)
+    },
+  )
 
   // GET /matches/:id
-  app.get<{ Params: IdParam }>('/matches/:id', async (req, reply) => {
-    const id = Number(req.params.id)
-    if (isNaN(id) || id < 1) {
-      return reply.status(400).send({ error: 'Invalid match id' })
-    }
-    const match = await matchesService.findById(id)
-    if (!match) return reply.status(404).send({ error: 'Match not found' })
-    return reply.send(match)
-  })
+  app.get<{ Params: IdParam }>(
+    '/matches/:id',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          properties: { id: { type: 'string', pattern: '^[1-9][0-9]*$' } },
+          required: ['id'],
+        },
+      },
+    },
+    async (req, reply) => {
+      const match = await matchesService.findById(Number(req.params.id))
+      if (!match) {
+        throw new BadRequestError('Match not found')
+      }
+      return reply.send(match)
+    },
+  )
 
   // POST /matches
-  app.post<{ Body: CreateMatchInput }>('/matches', async (req, reply) => {
-    const body = req.body
-    if (
-      !body?.externalId ||
-      !body?.winnerSide ||
-      !body?.duration ||
-      !body?.playedAt
-    ) {
-      return reply.status(400).send({ error: 'Missing required fields' })
-    }
-    if (!['radiant', 'dire'].includes(body.winnerSide)) {
-      return reply
-        .status(400)
-        .send({ error: 'winnerSide must be radiant or dire' })
-    }
-    if (!Array.isArray(body.heroes) || body.heroes.length === 0) {
-      return reply.status(400).send({ error: 'heroes array is required' })
-    }
-    try {
+  app.post<{ Body: CreateMatchInput }>(
+    '/matches',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'externalId',
+            'winnerSide',
+            'duration',
+            'playedAt',
+            'heroes',
+          ],
+          properties: {
+            externalId: { type: 'string', minLength: 1, maxLength: 128 },
+            winnerSide: { type: 'string', enum: ['radiant', 'dire'] },
+            duration: { type: 'integer', minimum: 1, maximum: 7200 },
+            playedAt: { type: 'string', format: 'date-time' },
+            heroes: {
+              type: 'array',
+              minItems: 2,
+              maxItems: 10,
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['heroId', 'side'],
+                properties: {
+                  heroId: { type: 'integer', minimum: 1 },
+                  side: { type: 'string', enum: ['radiant', 'dire'] },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const { body } = req
+      const heroIds = body.heroes.map((hero) => hero.heroId)
+      if (new Set(heroIds).size !== heroIds.length) {
+        throw new BadRequestError('heroId values must be unique')
+      }
+      if (
+        !body.heroes.some((hero) => hero.side === 'radiant') ||
+        !body.heroes.some((hero) => hero.side === 'dire')
+      ) {
+        throw new BadRequestError('Both teams must have at least one hero')
+      }
+
       const result = await matchesService.create(body)
-      const status = result.created ? 201 : 200
-      return reply.status(status).send(result)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      return reply
-        .status(500)
-        .send({ error: 'Failed to create match', detail: msg })
-    }
-  })
+      return reply.status(result.created ? 201 : 200).send(result)
+    },
+  )
 }
